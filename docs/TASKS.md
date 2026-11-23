@@ -5,7 +5,7 @@ Status values: `todo`, `review (PR #n)`, `done (PR #n)`, `blocked: <reason>`. Si
 ## M0 Foundation
 
 ### HC-001 Agent config change detection
-- Status: review
+- Status: review (PR #1)
 - Size: S
 - Depends on: none
 - Goal: `src/config/detect.ts` classifies changed paths as `skill`, `agents-md`, `claude-md`, `mcp-config`, `plugin-manifest`, `other`, using path rules (`**/SKILL.md`, `AGENTS.md`, `CLAUDE.md`, `.mcp.json`, `.claude/settings*.json`, `plugin.json`).
