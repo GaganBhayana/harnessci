@@ -4,10 +4,13 @@ export const CONFIG_KINDS = ['skill', 'agents-md', 'claude-md', 'mcp-config', 'p
 /** One of {@link CONFIG_KINDS}. */
 export type ConfigKind = (typeof CONFIG_KINDS)[number];
 
+/** A {@link ConfigKind} other than `other`: a file that is part of the agent setup. */
+export type AgentConfigKind = Exclude<ConfigKind, 'other'>;
+
 /** A changed path and its kind. */
 export interface ConfigChange {
   readonly path: string;
-  readonly kind: Exclude<ConfigKind, 'other'>;
+  readonly kind: AgentConfigKind;
 }
 
 /** The agent-config part of a PR's changed paths. */
@@ -15,7 +18,7 @@ export interface ConfigChangeSet {
   /** Agent-config paths in input order, without duplicates. `other` paths are left out. */
   readonly changes: readonly ConfigChange[];
   /** Agent-config paths grouped by kind. */
-  readonly byKind: Readonly<Record<Exclude<ConfigKind, 'other'>, readonly string[]>>;
+  readonly byKind: Readonly<Record<AgentConfigKind, readonly string[]>>;
 }
 
 /** Same as the glob `settings*.json`. */
@@ -27,6 +30,10 @@ const SETTINGS_FILE = /^settings[^/]*\.json$/;
  * `.mcp.json` and `.claude/settings*.json` are mcp-config; `.claude-plugin/plugin.json` and
  * `.claude-plugin/marketplace.json` are plugin-manifest. A bare `plugin.json` is `other`, because
  * other ecosystems use that name too.
+ *
+ * Settings files count as mcp-config because they decide which tools the agent may use: they
+ * enable or disable `.mcp.json` servers (`enabledMcpjsonServers`, `enableAllProjectMcpServers`)
+ * and hold permission rules and hooks.
  */
 export function classifyPath(path: string): ConfigKind {
   const parts = normalizePath(path).split('/');
@@ -41,10 +48,14 @@ export function classifyPath(path: string): ConfigKind {
   return 'other';
 }
 
-/** Picks the agent-config changes out of a PR's changed paths (include both sides of renames). */
+/**
+ * Picks the agent-config changes out of a PR's changed paths.
+ * @param paths Changed paths as listed by GitHub or git. For a renamed file, pass both the old and
+ *   the new path, so a config file renamed to a non-config name still counts as a change.
+ */
 export function detectConfigChanges(paths: readonly string[]): ConfigChangeSet {
   const changes: ConfigChange[] = [];
-  const byKind: Record<Exclude<ConfigKind, 'other'>, string[]> = {
+  const byKind: Record<AgentConfigKind, string[]> = {
     skill: [],
     'agents-md': [],
     'claude-md': [],
@@ -64,7 +75,11 @@ export function detectConfigChanges(paths: readonly string[]): ConfigChangeSet {
   return { changes, byKind };
 }
 
-/** Uses forward slashes and drops a leading `./` or `/`. */
+/** Uses forward slashes and drops empty and `.` segments, including a leading `./` or `/`. */
 export function normalizePath(path: string): string {
-  return path.replace(/\\/g, '/').replace(/^(?:\.\/|\/)+/, '');
+  return path
+    .replace(/\\/g, '/')
+    .split('/')
+    .filter((segment) => segment !== '' && segment !== '.')
+    .join('/');
 }

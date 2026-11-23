@@ -20,6 +20,9 @@ const cases: ReadonlyArray<readonly [string, ConfigKind]> = [
   ['.claude-plugin/plugin.json', 'plugin-manifest'],
   ['.claude-plugin/marketplace.json', 'plugin-manifest'],
   ['plugins/lint/.claude-plugin/plugin.json', 'plugin-manifest'],
+  ['.claude/settings-old.json', 'mcp-config'],
+  ['.claude//settings.json', 'mcp-config'],
+  ['.claude/./settings.json', 'mcp-config'],
   // look-alikes
   ['skill.md', 'other'],
   ['SKILL.md.bak', 'other'],
@@ -36,6 +39,11 @@ const cases: ReadonlyArray<readonly [string, ConfigKind]> = [
   ['plugin.json', 'other'],
   ['grafana/plugin.json', 'other'],
   ['.claude-plugin/README.md', 'other'],
+  ['.claude-plugin/sub/plugin.json', 'other'],
+  ['.claude/settings.json.bak', 'other'],
+  ['SKILL.MD', 'other'],
+  ['CLAUDE.MD', 'other'],
+  ['.claude', 'other'],
   ['src/index.ts', 'other'],
   ['', 'other'],
 ];
@@ -52,10 +60,13 @@ test('classifyPath accepts Windows separators and a leading ./', () => {
   assert.equal(classifyPath('/.claude/settings.json'), 'mcp-config');
 });
 
-test('normalizePath only touches separators and leading ./ or /', () => {
+test('normalizePath fixes separators and drops empty and . segments', () => {
   assert.equal(normalizePath('a\\b\\c.md'), 'a/b/c.md');
   assert.equal(normalizePath('././x'), 'x');
-  assert.equal(normalizePath('dir/./x'), 'dir/./x');
+  assert.equal(normalizePath('dir/./x'), 'dir/x');
+  assert.equal(normalizePath('//a//b/'), 'a/b');
+  assert.equal(normalizePath('../x'), '../x');
+  assert.equal(normalizePath(''), '');
 });
 
 test('detectConfigChanges keeps config paths in order, grouped by kind', () => {
@@ -85,6 +96,11 @@ test('detectConfigChanges keeps config paths in order, grouped by kind', () => {
 test('detectConfigChanges drops duplicates after normalising and skips empty paths', () => {
   const result = detectConfigChanges(['AGENTS.md', './AGENTS.md', '', 'docs\\AGENTS.md', 'docs/AGENTS.md']);
   assert.deepEqual(result.changes.map((c) => c.path), ['AGENTS.md', 'docs/AGENTS.md']);
+});
+
+test('detectConfigChanges counts a config file renamed away when both sides are passed', () => {
+  const result = detectConfigChanges(['.claude/skills/old/SKILL.md', '.claude/skills/old/NOTES.md']);
+  assert.deepEqual(result.changes, [{ path: '.claude/skills/old/SKILL.md', kind: 'skill' }]);
 });
 
 test('detectConfigChanges with no config paths is empty', () => {
