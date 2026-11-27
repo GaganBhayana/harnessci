@@ -94,6 +94,49 @@ test('applies block scalar chomping indicators', () => {
   assert.equal(fm['clip'], 'one two\nthree\n');
 });
 
+test('folds a plain value continued on indented lines', () => {
+  const fm = frontmatterOf(
+    [
+      '---',
+      'description: Fills PDF forms. Use when',
+      '  the user asks to fill one in.',
+      '',
+      '    Second paragraph. # trailing comment',
+      'next: value',
+      '---',
+    ].join('\n'),
+  );
+  assert.equal(fm['description'], 'Fills PDF forms. Use when the user asks to fill one in.\nSecond paragraph.');
+  assert.equal(fm['next'], 'value');
+});
+
+test('rejects a comment inside a multi-line plain value', () => {
+  const result = parseSkillFile('---\ndescription: one # c\n  two\n---\n');
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.deepEqual(result.issues, [{ code: 'malformed-line', message: 'a comment cannot appear inside a multi-line value; quote the value', line: 2 }]);
+  assert.equal(parseSkillFile('---\ndescription: one\n  # c\n  two\n---\n').ok, false);
+});
+
+test('rejects ": " in a plain value, as YAML does, but not in a quoted one', () => {
+  for (const text of ['description: Use when: the user asks', 'description: Use for:', 'description: one\n  two: three', 'tools:\n  - Read: all']) {
+    const result = parseSkillFile(`---\n${text}\n---\n`);
+    assert.equal(result.ok, false, text);
+    if (!result.ok) assert.match(result.issues[0]?.message ?? '', /quote the value/, text);
+  }
+  const fm = frontmatterOf('---\na: "Use when: the user asks"\nb: \'x: y\'\nc: see https://example.com:8080/x\nd: a:b\n---\n');
+  assert.equal(fm['a'], 'Use when: the user asks');
+  assert.equal(fm['b'], 'x: y');
+  assert.equal(fm['c'], 'see https://example.com:8080/x');
+  assert.equal(fm['d'], 'a:b');
+});
+
+test('long runs of spaces in a plain value are parsed in linear time', () => {
+  const started = performance.now();
+  const fm = frontmatterOf(`---\ndescription: x${' '.repeat(200_000)}y\n---\n`);
+  assert.ok(performance.now() - started < 500, 'comment stripping must not backtrack');
+  assert.equal(fm['description'], `x${' '.repeat(200_000)}y`);
+});
+
 test('reads a list written at the key indentation', () => {
   assert.deepEqual(frontmatterOf('---\ntools:\n- Read\n- Grep\n---\n')['tools'], ['Read', 'Grep']);
 });
@@ -159,7 +202,8 @@ test('validates description length and content', () => {
   assert.deepEqual(at('   '), ['empty-description']);
   assert.deepEqual(at('Use when <b>asked</b>'), ['xml-tag']);
   assert.deepEqual(at('Use when a < b and c > d'), []);
-  assert.deepEqual(validateSkillFrontmatter({ name: 'ok', description: { raw: 'a: b' } }).map((i) => i.code), ['empty-description']);
+  assert.deepEqual(validateSkillFrontmatter({ name: 'ok', description: { raw: 'a: b' } }).map((i) => i.code), ['invalid-description']);
+  assert.deepEqual(validateSkillFrontmatter({ name: 'ok', description: ['a', 'b'] }).map((i) => i.code), ['invalid-description']);
 });
 
 test('reports name and description problems together', () => {

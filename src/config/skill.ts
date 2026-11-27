@@ -5,7 +5,9 @@
  * body. Only a small YAML subset is read, enough for real skill files and no more:
  *
  * - `key: value` pairs at the top level; keys are letters, digits, `_` and `-`;
- * - plain, 'single-quoted' and "double-quoted" scalars (plain scalars drop a trailing ` # comment`);
+ * - plain, 'single-quoted' and "double-quoted" scalars (plain scalars drop a trailing ` # comment`
+ *   and may continue on indented lines, which fold into one line as in YAML; like YAML, a plain
+ *   scalar cannot contain `: ` or end with `:`, so such a value must be quoted);
  * - `|` and `>` block scalars, with an optional `-` or `+` chomping indicator (an indentation
  *   indicator is accepted but the block is always dedented by its smallest indent);
  * - a list of scalars (`- item` lines indented under a key with an empty value);
@@ -32,6 +34,7 @@ export type SkillIssueCode =
   | 'invalid-name'
   | 'name-mismatch'
   | 'empty-description'
+  | 'invalid-description'
   | 'description-too-long'
   | 'xml-tag';
 
@@ -146,7 +149,7 @@ function validateName(value: FrontmatterValue | undefined, options: SkillValidat
 
 function validateDescription(value: FrontmatterValue | undefined): SkillIssue[] {
   if (value === undefined) return [{ code: 'missing-description', message: 'frontmatter has no "description"' }];
-  if (typeof value !== 'string') return [{ code: 'empty-description', message: '"description" must be a single string' }];
+  if (typeof value !== 'string') return [{ code: 'invalid-description', message: '"description" must be a single string' }];
   if (value.trim() === '') return [{ code: 'empty-description', message: '"description" is empty' }];
   if (value.length > MAX_DESCRIPTION_LENGTH) {
     return [{ code: 'description-too-long', message: `"description" is ${value.length} characters; the limit is ${MAX_DESCRIPTION_LENGTH}` }];
@@ -208,8 +211,9 @@ function parseValue(rest: string, block: readonly string[]): FrontmatterValue | 
   const blockHeader = /^([|>])[1-9]?([-+]?)[1-9]?(?:[ \t]+#.*)?$/.exec(rest);
   if (blockHeader !== null) return blockScalar(blockHeader[1] === '>', blockHeader[2] ?? '', block);
   if (rest !== '' && !rest.startsWith('#')) {
-    if (block.length > 0) return { error: 'a value on the key line cannot be followed by indented lines' };
-    return scalar(rest);
+    if (block.length === 0) return scalar(rest);
+    if (isPlainStart(rest) && block.every((line) => line.trim() === '' || /^[ \t]/.test(line))) return multilinePlain(rest, block);
+    return { error: 'a value on the key line cannot be followed by indented lines' };
   }
   const content = dedent(block);
   if (content.length === 0) return '';
@@ -224,6 +228,28 @@ function parseValue(rest: string, block: readonly string[]): FrontmatterValue | 
     return items;
   }
   return { raw: content.join('\n') };
+}
+
+/**
+ * A plain scalar continued on indented lines: lines are joined with spaces and a blank
+ * line becomes a newline. Only the last line may end with a ` # comment`.
+ */
+function multilinePlain(first: string, block: readonly string[]): string | { error: string } {
+  const lines = [first, ...dedent(block).map((line) => line.trim())];
+  let last = lines.length - 1;
+  while (last > 0 && lines[last] === '') last -= 1;
+  const pieces: string[] = [];
+  for (let i = 0; i <= last; i += 1) {
+    const line = lines[i] ?? '';
+    const comment = commentStart(line);
+    if (line.startsWith('#') || (comment !== -1 && i < last)) {
+      return { error: 'a comment cannot appear inside a multi-line value; quote the value' };
+    }
+    const piece = comment === -1 ? line : line.slice(0, comment).trimEnd();
+    if (MAPPING_INDICATOR.test(piece)) return { error: MAPPING_INDICATOR_ERROR };
+    pieces.push(piece);
+  }
+  return fold(pieces);
 }
 
 function blockScalar(folded: boolean, chomp: string, block: readonly string[]): string {
@@ -262,10 +288,30 @@ function scalar(text: string): string | { error: string } {
     if (match === null) return { error: 'unterminated or malformed double-quoted value' };
     return unescapeDouble(match[1] ?? '');
   }
-  if (/^[&*!%@`]/.test(text) || /^[[{]/.test(text)) {
+  if (!isPlainStart(text)) {
     return { error: 'anchors, aliases, tags, flow collections and reserved indicators are not supported; quote the value' };
   }
-  return text.replace(/[ \t]+#.*$/, '').trim();
+  const comment = commentStart(text);
+  const value = (comment === -1 ? text : text.slice(0, comment)).trim();
+  if (MAPPING_INDICATOR.test(value)) return { error: MAPPING_INDICATOR_ERROR };
+  return value;
+}
+
+/** `: ` inside, or `:` at the end of, a plain scalar: YAML reads it as a mapping, not text. */
+const MAPPING_INDICATOR = /:(?:[ \t]|$)/;
+const MAPPING_INDICATOR_ERROR = 'a plain value cannot contain ": " or end with ":"; quote the value';
+
+/** True when the text can start a plain scalar (no quote, anchor, alias, tag, flow or reserved indicator). */
+function isPlainStart(text: string): boolean {
+  return !/^[&*!%@`'"[{]/.test(text);
+}
+
+/**
+ * Index of the space or tab that starts a ` # comment`, or -1. A plain search, because a
+ * pattern like `/[ \t]+#.*$/` backtracks quadratically on long runs of spaces.
+ */
+function commentStart(text: string): number {
+  return text.search(/[ \t]#/);
 }
 
 const ESCAPES: Readonly<Record<string, string>> = { n: '\n', t: '\t', r: '\r', '"': '"', '\\': '\\', '/': '/', '0': '\0', ' ': ' ' };
