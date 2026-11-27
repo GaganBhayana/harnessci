@@ -12,7 +12,7 @@ Status values: `todo`, `review (PR #n)`, `done (PR #n)`, `blocked: <reason>`. Si
 - Acceptance: table-driven tests with nested paths and look-alikes.
 
 ### HC-002 SKILL.md frontmatter parser and validator
-- Status: todo
+- Status: review
 - Size: S
 - Depends on: none
 - Goal: `src/config/skill.ts` parses YAML-subset frontmatter (`name`, `description`, other keys) and body; validates name format and description length.
